@@ -129,7 +129,7 @@ export class AuthenticatedGoogleSheetsService {
   /**
    * Fetch headers from a specific sheet using authenticated access
    */
-  async fetchSheetHeaders(spreadsheetId: string, sheetName: string, range: string = 'A1:Z1'): Promise<string[]> {
+  async fetchSheetHeaders(spreadsheetId: string, sheetName: string, range: string = 'A1:ZZ1'): Promise<string[]> {
     try {
       console.log('🔐 Attempting authenticated header access...');
       console.log('📄 Spreadsheet ID:', spreadsheetId);
@@ -288,11 +288,24 @@ export async function fetchHeadersWithPublicAPI(spreadsheetId: string, sheetName
     console.log('🌐 Using public Google Sheets API for headers...');
     
     const response = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetName}!A1:Z1?key=${apiKey}`
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetName}!A1:ZZ1?key=${apiKey}`
     );
     
     if (!response.ok) {
-      console.warn('⚠️ Public API call failed for headers');
+      let errorMessage = '⚠️ Public API call failed for headers';
+      
+      if (response.status === 403) {
+        errorMessage += ' - 403 Forbidden: Check API key permissions or spreadsheet sharing settings';
+        console.warn(errorMessage);
+        console.warn('💡 Tip: Ensure the spreadsheet is shared publicly or the API key has access');
+      } else if (response.status === 404) {
+        errorMessage += ' - 404 Not Found: Spreadsheet or sheet name not found';
+        console.warn(errorMessage);
+      } else {
+        errorMessage += ` - ${response.status} ${response.statusText}`;
+        console.warn(errorMessage);
+      }
+      
       return getFallbackHeaders(sheetName);
     }
     
@@ -350,6 +363,7 @@ export function getFallbackHeaders(sheetName: string): string[] {
     'Weeks': ['Week Number', 'Start Date', 'End Date', 'Revenue', 'Bookings'],
     'Users': ['User ID', 'Name', 'Email', 'Role', 'Status', 'Created Date'],
     'Bookings': ['Booking ID', 'User ID', 'Service', 'Date', 'Status', 'Amount'],
+    'BOOKING X': ['Booking ID', 'Customer Name', 'Service Type', 'Date', 'Time', 'Status', 'Amount', 'Payment Method'],
     'Products': ['Product ID', 'Name', 'Category', 'Price', 'Stock', 'Description'],
     'Analytics': ['Date', 'Metric', 'Value', 'Source', 'Category'],
     'Reports': ['Report ID', 'Title', 'Type', 'Generated Date', 'Status'],

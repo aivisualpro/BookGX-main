@@ -10,7 +10,6 @@ import {
   XCircle, 
   RefreshCw 
 } from 'lucide-react';
-import logger from '../../utils/logger';
 
 // Firebase imports
 import { 
@@ -26,6 +25,16 @@ import {
   getFallbackSheetNames, 
   fetchSheetsWithPublicAPI 
 } from '../../utils/backendSheetsService';
+
+// Import optimization utilities
+import { 
+  Logger,
+  checkBackendHealth,
+  shouldRefreshSheetMetadata,
+  sessionCache,
+  PersistentCache,
+  CACHE_KEYS 
+} from '../../utils/optimizations';
 
 // Interfaces
 interface DatabaseConnection {
@@ -172,47 +181,99 @@ export function DatabasesManager({
   const fetchAvailableSheets = async (googleSheetId: string, connection?: GoogleConnection): Promise<string[]> => {
     try {
       if (!connection) {
-        console.error('No connection provided for API access');
+        Logger.error('No connection provided for API access');
         return getFallbackSheetNames();
       }
 
-      console.log('� Fetching sheet names using authenticated Google Sheets API...');
-      console.log('📄 Spreadsheet ID:', googleSheetId);
+      Logger.debug('Fetching sheet names using authenticated Google Sheets API...');
+      Logger.debug('Spreadsheet ID:', googleSheetId);
+      
+      // Check if we should refresh metadata or use cached data
+      const cachedSheets = sessionCache.get(`sheets_${googleSheetId}`);
+      if (cachedSheets && Array.isArray(cachedSheets) && cachedSheets.length > 0) {
+        Logger.debug('Using cached sheet names:', cachedSheets.length);
+        return cachedSheets;
+      }
+
+      let sheetNames: string[] = [];
       
       // Method 1: Try backend service with service account authentication
       if (connection.clientEmail && connection.privateKey && connection.projectId) {
-        console.log('🔐 Attempting backend service authentication...');
+        Logger.debug('Attempting backend service authentication...');
         try {
-          const backendService = createBackendSheetsService();
+          // Clear backend health cache to force fresh check
+          sessionCache.clear('backend_health');
           
-          // Check if backend is running
-          const isBackendRunning = await backendService.checkHealth();
-          if (!isBackendRunning) {
-            console.warn('⚠️ Backend service is not running');
+          // Use optimized backend health check
+          const isBackendHealthy = await checkBackendHealth();
+          if (!isBackendHealthy) {
+            Logger.warn('Backend service is not available - skipping backend authentication method');
             throw new Error('Backend service is not available');
           }
+
+          const backendService = createBackendSheetsService();
           
           // Test access first
+          Logger.debug('Testing backend access to spreadsheet...');
           const hasAccess = await backendService.testAccess(googleSheetId, connection);
           if (!hasAccess) {
-            console.warn('⚠️ Backend access test failed, trying fallback methods');
+            Logger.warn('Backend access test failed - spreadsheet may not be accessible or credentials invalid');
             throw new Error('Backend access test failed');
           }
 
           // Fetch sheet names via backend
-          const sheetNames = await backendService.fetchAvailableSheets(googleSheetId, connection);
-          console.log('✅ Successfully fetched sheets using backend service:', sheetNames);
-          return sheetNames;
+          Logger.debug('Fetching sheet names via backend service...');
+          sheetNames = await backendService.fetchAvailableSheets(googleSheetId, connection);
+          if (sheetNames && sheetNames.length > 0) {
+            Logger.success('✅ Successfully fetched REAL sheets using backend service:', sheetNames.length);
+            Logger.debug('Real sheet names:', sheetNames);
+            // Cache the results for 30 minutes
+            sessionCache.set(`sheets_${googleSheetId}`, sheetNames, 30);
+            return sheetNames;
+          } else {
+            Logger.warn('Backend service returned empty sheet list');
+            throw new Error('Backend service returned no sheets');
+          }
           
         } catch (backendError: any) {
-          console.log('⚠️ Backend service failed:', backendError.message);
-          console.log('🔄 Trying public API fallback...');
+          Logger.warn('Backend service failed:', backendError.message);
+          Logger.debug('Trying public API fallback...');
         }
       }
+
+      // Method 2: Try public API with API key (works for public sheets)
+      if (connection.apiKey) {
+        Logger.debug('Trying public API access with API key...');
+        try {
+          sheetNames = await fetchSheetsWithPublicAPI(googleSheetId, connection.apiKey);
+          if (sheetNames && sheetNames.length > 0) {
+            Logger.success('✅ Successfully fetched REAL sheets using public API:', sheetNames.length);
+            Logger.debug('Real sheet names:', sheetNames);
+            // Cache the results for 30 minutes
+            sessionCache.set(`sheets_${googleSheetId}`, sheetNames, 30);
+            return sheetNames;
+          } else {
+            Logger.warn('Public API returned empty sheet list');
+            throw new Error('Public API returned no sheets');
+          }
+        } catch (publicApiError) {
+          Logger.warn('Public API access failed:', publicApiError);
+          Logger.debug('Will fall back to dummy data...');
+        }
+      } else {
+        Logger.warn('No API key provided - skipping public API method');
+      }
+
+      // Method 3: Use fallback sheet names (DUMMY DATA)
+      Logger.warn('⚠️ All authentication methods failed - using FALLBACK/DUMMY sheet names');
+      Logger.warn('These are NOT your real Google Sheet tabs!');
+      Logger.info('💡 To access real sheets: 1) Start backend service, 2) Check credentials, 3) Add API key for public sheets');
+      const fallbackSheets = getFallbackSheetNames();
+      return fallbackSheets;
       
     } catch (error: any) {
-      console.error('❌ Error fetching sheets with authenticated API:', error);
-      console.log('🔄 Falling back to default sheet names...');
+      Logger.error('Error fetching sheets with authenticated API:', error);
+      Logger.debug('Falling back to default sheet names...');
       return getFallbackSheetNames();
     }
   };
@@ -245,11 +306,14 @@ export function DatabasesManager({
     try {
       const sheetNames = await fetchAvailableSheets(newDatabaseSheetId.trim(), currentConnection);
       
+      // Ensure sheetNames is an array to prevent length errors
+      const sheetsArray = Array.isArray(sheetNames) ? sheetNames : [];
+      
       const finalDatabase = {
         ...newDatabase,
         status: 'connected' as const,
-        totalSheetsAvailable: sheetNames.length,
-        availableSheetNames: sheetNames,
+        totalSheetsAvailable: sheetsArray.length,
+        availableSheetNames: sheetsArray,
         errorMessage: undefined
       };
 
@@ -262,10 +326,10 @@ export function DatabasesManager({
       );
       setDatabases(finalDatabases);
       
-      console.log(`✅ Successfully connected to Google Sheet with ${sheetNames.length} sheets:`, sheetNames);
+      Logger.success(`Successfully connected to Google Sheet with ${sheetsArray.length} sheets:`, sheetsArray);
       
     } catch (error) {
-      console.error('❌ Error connecting to Google Sheet:', error);
+      Logger.error('Error connecting to Google Sheet:', error);
       
       const errorDatabase = {
         ...newDatabase,
@@ -371,9 +435,9 @@ export function DatabasesManager({
     setDatabases(testingDatabases);
 
     try {
-      console.log('🧪 TEST BUTTON CLICKED - Starting connection test and refresh...');
-      console.log('📄 Database ID:', databaseId);
-      console.log('🔗 Selected Connection:', selectedConnection);
+      Logger.debug('TEST BUTTON CLICKED - Starting connection test and refresh...');
+      Logger.debug('Database ID:', databaseId);
+      Logger.debug('Selected Connection:', selectedConnection);
       
       const currentConnection = await getCurrentConnection();
       
@@ -381,20 +445,28 @@ export function DatabasesManager({
         throw new Error('No connection selected for testing');
       }
 
-      console.log('🔑 Using connection:', currentConnection.name);
-      console.log('📊 Testing Google Sheet ID:', database.googleSheetId);
+      Logger.debug('Using connection:', currentConnection.name);
+      Logger.debug('Testing Google Sheet ID:', database.googleSheetId);
 
       const availableSheets = await fetchAvailableSheets(database.googleSheetId, currentConnection);
+      
+      // Ensure availableSheets is an array to prevent the length error
+      const sheetsArray = Array.isArray(availableSheets) ? availableSheets : [];
       const connectedSheets = database.tables?.length || 0;
+      
+      // Check if these are fallback sheets by comparing with known fallback data
+      const fallbackSheetNames = ['KPIs Report', 'Modules', 'Notifications', 'Translations', 'Users', 'Bookings', 'Products', 'Analytics', 'Reports', 'Settings', 'Dashboard', 'Metrics', 'ProductLocation', 'Gift Cards', 'Gift Card Purchases', 'Artist rating', 'Dropdowns', 'Calendar', 'Weeks'];
+      const isUsingFallbackData = sheetsArray.length === fallbackSheetNames.length && 
+        sheetsArray.every(sheet => fallbackSheetNames.includes(sheet));
       
       const testedDatabase = { 
         ...database, 
         status: 'connected' as const, 
         lastTested: new Date(),
-        totalSheetsAvailable: availableSheets.length,
+        totalSheetsAvailable: sheetsArray.length,
         sheetsConnected: connectedSheets,
-        availableSheetNames: availableSheets,
-        errorMessage: undefined
+        availableSheetNames: sheetsArray,
+        errorMessage: isUsingFallbackData ? 'Using fallback data - real sheets not accessible' : undefined
       };
 
       // Save to Firebase
@@ -406,10 +478,15 @@ export function DatabasesManager({
       );
       setDatabases(connectedDatabases);
       
-      console.log(`✅ Successfully tested connection to Google Sheet with ${availableSheets.length} sheets:`, availableSheets);
+      if (isUsingFallbackData) {
+        Logger.warn(`⚠️ Connection test completed but using FALLBACK/DUMMY data (${sheetsArray.length} sheets). Real Google Sheets not accessible.`);
+        Logger.info('💡 To access real sheets: Check your credentials, start backend service, or add API key');
+      } else {
+        Logger.success(`✅ Successfully accessed REAL Google Sheet with ${sheetsArray.length} sheets:`, sheetsArray);
+      }
       
     } catch (error) {
-      console.error('❌ Failed to test connection:', error);
+      Logger.error('Failed to test connection:', error);
       
       const errorDatabase = { 
         ...database, 
@@ -525,17 +602,6 @@ export function DatabasesManager({
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          refreshDatabase(database.id);
-                        }}
-                        className="flex items-center space-x-1 bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700 transition-colors"
-                      >
-                        <Settings className="w-3 h-3" />
-                        <span>Refresh</span>
-                      </button>
-
                       <button
                         onClick={(e) => {
                           e.stopPropagation();

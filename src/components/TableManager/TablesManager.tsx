@@ -4,10 +4,12 @@ import {
   Trash2, 
   Database, 
   ArrowLeft,
-  Settings,
   CheckCircle, 
   XCircle, 
-  RefreshCw 
+  RefreshCw,
+  TestTube,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 
 // Firebase imports
@@ -26,13 +28,20 @@ import {
   fetchHeadersWithPublicAPI 
 } from '../../utils/backendSheetsService';
 
+// Import optimization utilities
+import { 
+  Logger,
+  checkBackendHealth,
+  sessionCache
+} from '../../utils/optimizations';
+
 // Interfaces
 interface TableConnection {
   id: string;
   name: string;
   sheetName: string;
   sheetId: string;
-  status: 'connected' | 'loading' | 'error';
+  status: 'connected' | 'loading' | 'testing' | 'error';
   headers: HeaderMapping[];
   totalHeaders?: number;
   headersConnected?: number;
@@ -162,25 +171,33 @@ export function TablesManager({
   // Status helper functions
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'connected': return <CheckCircle className="w-4 h-4 text-green-500" />;
-      case 'testing': return <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />;
-      case 'loading': return <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />;
-      case 'error': return <XCircle className="w-4 h-4 text-red-500" />;
-      default: return <XCircle className="w-4 h-4 text-gray-500" />;
+      case 'connected':
+        return <CheckCircle className="w-4 h-4 text-green-500" />;
+      case 'testing':
+        return <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />;
+      case 'loading':
+        return <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />;
+      case 'error':
+        return <AlertCircle className="w-4 h-4 text-red-500" />;
+      default:
+        return <AlertCircle className="w-4 h-4 text-gray-500" />;
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'connected': return 'text-green-400';
-      case 'testing': return 'text-blue-400';
-      case 'loading': return 'text-blue-400';
-      case 'error': return 'text-red-400';
-      default: return 'text-gray-400';
+      case 'connected':
+        return 'text-green-400';
+      case 'testing':
+        return 'text-blue-400';
+      case 'loading':
+        return 'text-blue-400';
+      case 'error':
+        return 'text-red-400';
+      default:
+        return 'text-gray-400';
     }
-  };
-
-  // Fetch headers from a specific sheet using enhanced API approach with fallbacks
+  };  // Fetch headers from a specific sheet using enhanced API approach with fallbacks
   const fetchSheetHeaders = async (googleSheetId: string, sheetName: string, connection?: GoogleConnection): Promise<string[]> => {
     try {
       if (!connection) {
@@ -213,7 +230,7 @@ export function TablesManager({
           }
 
           // Fetch headers via backend
-          const headers = await backendService.fetchSheetHeaders(googleSheetId, sheetName, connection, 'A1:Z1');
+          const headers = await backendService.fetchSheetHeaders(googleSheetId, sheetName, connection, 'A1:ZZ1');
           console.log('✅ Successfully fetched headers using backend service:', headers);
           return headers;
           
@@ -367,6 +384,133 @@ export function TablesManager({
     }
   };
 
+  const testTable = async (tableId: string) => {
+    const currentTables = getCurrentTables();
+    const table = currentTables.find(t => t.id === tableId);
+    
+    if (!table) return;
+
+    // Set testing status
+    const testingTable = { ...table, status: 'testing' as const };
+    const testingTables = currentTables.map(t => 
+      t.id === tableId ? testingTable : t
+    );
+    setTables(testingTables);
+
+    try {
+      Logger.debug('🧪 Testing table connection and fetching real headers...');
+      Logger.debug('Table:', table.name);
+      Logger.debug('Sheet Name:', table.sheetName);
+      
+      const currentConnection = await getCurrentConnection();
+      const currentDatabase = await getCurrentDatabase();
+      
+      if (!currentConnection || !currentDatabase) {
+        throw new Error('Missing connection or database data for testing');
+      }
+
+      Logger.debug('Using connection:', currentConnection.name);
+      Logger.debug('Using database:', currentDatabase.name);
+      Logger.debug('Google Sheet ID:', currentDatabase.googleSheetId);
+
+      // Clear backend health cache to force fresh check
+      sessionCache.clear('backend_health');
+      
+      let realHeaders: string[] = [];
+      
+      // Try backend service first
+      const isBackendHealthy = await checkBackendHealth();
+      
+      if (isBackendHealthy && currentConnection.clientEmail && currentConnection.privateKey) {
+        Logger.debug('Backend is healthy! Attempting backend service for table headers');
+        try {
+          const backendService = createBackendSheetsService();
+          
+          const hasAccess = await backendService.testAccess(currentDatabase.googleSheetId, currentConnection);
+          if (hasAccess) {
+            Logger.debug('Backend access test passed! Fetching real headers from sheet...');
+            
+            realHeaders = await backendService.fetchSheetHeaders(
+              currentDatabase.googleSheetId, 
+              table.sheetName, 
+              currentConnection
+            );
+            
+            if (realHeaders && realHeaders.length > 0) {
+              Logger.success('✅ Successfully fetched REAL headers for table using backend service:', realHeaders.length);
+              Logger.debug('Real headers:', realHeaders);
+            } else {
+              throw new Error('Backend service returned no headers');
+            }
+          } else {
+            throw new Error('Backend access test failed');
+          }
+        } catch (backendError) {
+          Logger.warn('Backend service failed for table headers:', backendError);
+        }
+      }
+      
+      // Try public API if backend failed and API key is available
+      if (realHeaders.length === 0 && currentConnection.apiKey) {
+        Logger.debug('Trying public API for table headers...');
+        try {
+          const { fetchHeadersWithPublicAPI } = await import('../../utils/authenticatedGoogleSheets');
+          realHeaders = await fetchHeadersWithPublicAPI(
+            currentDatabase.googleSheetId,
+            table.sheetName,
+            currentConnection.apiKey
+          );
+          
+          if (realHeaders && realHeaders.length > 0) {
+            Logger.success('✅ Successfully fetched REAL headers for table using public API:', realHeaders.length);
+            Logger.debug('Real headers:', realHeaders);
+          }
+        } catch (apiError) {
+          Logger.warn('Public API failed for table headers:', apiError);
+        }
+      }
+
+      // Update table with real header count or error
+      const updatedTable = { 
+        ...table, 
+        status: realHeaders.length > 0 ? 'connected' as const : 'error' as const,
+        totalHeaders: realHeaders.length > 0 ? realHeaders.length : undefined,
+        errorMessage: realHeaders.length === 0 ? 'Could not fetch real headers - using fallback data' : undefined
+      };
+
+      // Save to Firebase
+      await saveTable(selectedConnection, selectedDatabase, updatedTable);
+
+      // Update local state
+      const updatedTables = currentTables.map(t => 
+        t.id === tableId ? updatedTable : t
+      );
+      setTables(updatedTables);
+      
+      if (realHeaders.length > 0) {
+        Logger.success(`✅ Table test successful! Found ${realHeaders.length} real columns in "${table.sheetName}"`);
+      } else {
+        Logger.warn(`⚠️ Table test completed but could not access real headers for "${table.sheetName}"`);
+      }
+      
+    } catch (error) {
+      Logger.error('Failed to test table:', error);
+      
+      const errorTable = { 
+        ...table, 
+        status: 'error' as const, 
+        errorMessage: error instanceof Error ? error.message : 'Table test failed'
+      };
+
+      await saveTable(selectedConnection, selectedDatabase, errorTable);
+
+      const errorTables = currentTables.map(t => 
+        t.id === tableId ? errorTable : t
+      );
+      setTables(errorTables);
+    }
+  };
+
   // Get current tables for display
   const currentTables = getCurrentTables();
 
@@ -425,12 +569,18 @@ export function TablesManager({
           ) : (
             <div className="space-y-4">
               {currentTables.map((table) => (
-                <div key={table.id} className="bg-white/5 rounded-lg p-4 border border-white/10">
+                <div key={table.id} className="bg-white/5 rounded-lg p-4 border border-white/10 hover:bg-white/10 transition-colors cursor-pointer">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
+                    <div 
+                      className="flex items-center space-x-3 flex-1"
+                      onClick={() => {
+                        setSelectedTable(table.id);
+                        setCurrentView('headers');
+                      }}
+                    >
                       {getStatusIcon(table.status)}
                       <div>
-                        <div className="text-white font-medium">{table.name}</div>
+                        <div className="text-white font-medium hover:text-blue-400 transition-colors">{table.name}</div>
                         <div className="text-sm text-gray-400">
                           Sheet: {table.sheetName}
                         </div>
@@ -452,17 +602,20 @@ export function TablesManager({
                     </div>
                     <div className="flex items-center space-x-2">
                       <button
-                        onClick={() => {
-                          setSelectedTable(table.id);
-                          setCurrentView('headers');
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          testTable(table.id);
                         }}
-                        className="flex items-center space-x-1 bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700 transition-colors"
+                        disabled={table.status === 'testing'}
+                        className="flex items-center space-x-1 bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Test table connection and fetch real column headers"
                       >
-                        <Settings className="w-3 h-3" />
-                        <span>Headers</span>
+                        <TestTube className="w-3 h-3" />
+                        <span>{table.status === 'testing' ? 'Testing...' : 'Test'}</span>
                       </button>
                       <button
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           if (confirm(`Are you sure you want to delete the table "${table.name}"? This action cannot be undone.`)) {
                             deleteTable(table.id);
                           }

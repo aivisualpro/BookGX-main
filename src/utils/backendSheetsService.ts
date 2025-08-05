@@ -1,7 +1,7 @@
 // Backend API service for authenticated Google Sheets access
 // This replaces direct browser-based authentication with secure server-side calls
 
-import logger from './logger';
+import { checkBackendHealth, Logger } from './optimizations';
 
 const BACKEND_URL = 'http://localhost:3001';
 
@@ -47,23 +47,10 @@ export class BackendSheetsService {
   }
 
   /**
-   * Check if backend server is running
+   * Check if backend server is running (uses optimized caching)
    */
   async checkHealth(): Promise<boolean> {
-    try {
-      const response = await fetch(`${this.baseUrl}/health`);
-      
-      if (response.ok) {
-        logger.debug('Backend health check passed');
-      } else {
-        logger.warn('Backend health check failed', { status: response.status });
-      }
-      
-      return response.ok;
-    } catch (error) {
-      logger.error('Backend service unreachable', error);
-      return false;
-    }
+    return checkBackendHealth();
   }
 
   /**
@@ -71,9 +58,9 @@ export class BackendSheetsService {
    */
   async fetchAvailableSheets(spreadsheetId: string, connection: any): Promise<string[]> {
     try {
-      logger.debug('Fetching sheets via secure backend...');
-      logger.debug('Spreadsheet ID:', spreadsheetId);
-      logger.debug('Backend URL:', `${this.baseUrl}/api/fetchSheets`);
+      Logger.debug('Fetching sheets via secure backend...');
+      Logger.debug('Spreadsheet ID:', spreadsheetId);
+      Logger.debug('Backend URL:', `${this.baseUrl}/api/fetchSheets`);
 
       const response = await fetch(`${this.baseUrl}/api/fetchSheets`, {
         method: 'POST',
@@ -99,16 +86,16 @@ export class BackendSheetsService {
       const data: SheetNamesResponse = await response.json();
       
       if (data.success !== false) {
-        logger.success('Successfully fetched sheets via backend', { 
+        Logger.success('Successfully fetched sheets via backend:', {
           count: data.sheetNames.length,
-          firstSheets: data.sheetNames.slice(0, 3).join(', ') + (data.sheetNames.length > 3 ? '...' : '')
+          sheets: data.sheetNames
         });
         return data.sheetNames;
       } else {
         throw new Error(data.error || 'Backend request failed');
       }
     } catch (error: any) {
-      logger.error('Error fetching sheets via backend', error);
+      Logger.error('Error fetching sheets via backend', error);
       
       // Provide detailed error information
       if (error.message.includes('Failed to fetch')) {
@@ -126,7 +113,7 @@ export class BackendSheetsService {
   /**
    * Fetch headers from a specific sheet via backend
    */
-  async fetchSheetHeaders(spreadsheetId: string, sheetName: string, connection: any, range: string = 'A1:Z1'): Promise<string[]> {
+  async fetchSheetHeaders(spreadsheetId: string, sheetName: string, connection: any, range: string = 'A1:ZZ1'): Promise<string[]> {
     try {
       console.log('🔐 Fetching headers via secure backend...');
       console.log('📄 Spreadsheet ID:', spreadsheetId);
@@ -185,8 +172,8 @@ export class BackendSheetsService {
    */
   async testAccess(spreadsheetId: string, connection: any): Promise<boolean> {
     try {
-      logger.debug('Testing access via secure backend...');
-      logger.debug('Backend URL:', `${this.baseUrl}/api/testAccess`);
+      Logger.debug('Testing access via secure backend...');
+      Logger.debug('Backend URL:', `${this.baseUrl}/api/testAccess`);
 
       const response = await fetch(`${this.baseUrl}/api/testAccess`, {
         method: 'POST',
@@ -206,21 +193,21 @@ export class BackendSheetsService {
 
       if (!response.ok) {
         const errorData = await response.json();
-        logger.error('Backend access test failed', errorData.error);
+        Logger.error('Backend access test failed', errorData.error);
         return false;
       }
 
       const data: AccessTestResponse = await response.json();
       
       if (data.hasAccess) {
-        logger.success('Access confirmed to Google Sheet', { title: data.spreadsheetTitle });
+        Logger.success('Access confirmed to Google Sheet', { title: data.spreadsheetTitle });
         return true;
       } else {
-        logger.warn('Backend access test failed', data.error);
+        Logger.warn('Backend access test failed', data.error);
         return false;
       }
     } catch (error: any) {
-      logger.error('Error testing access via backend', error);
+      Logger.error('Error testing access via backend', error);
       return false;
     }
   }
@@ -230,9 +217,10 @@ export class BackendSheetsService {
    */
   async fetchSheetData(spreadsheetId: string, sheetName: string, connection: any, range?: string): Promise<any[][]> {
     try {
-      logger.sheetsOperation('Fetch Sheet Data', spreadsheetId, {
-        sheet: sheetName, 
-        range: range || 'default range'
+      Logger.debug('Fetch Sheet Data operation starting...', {
+        spreadsheetId,
+        sheetName,
+        range
       });
 
       const response = await fetch(`${this.baseUrl}/api/fetchData`, {
@@ -261,13 +249,13 @@ export class BackendSheetsService {
       const data = await response.json();
       
       if (data.success !== false) {
-        logger.sheetsResult('Sheet Data Fetch', true, { rows: data.rowCount });
+        Logger.success('Sheet Data Fetch completed successfully:', { rows: data.rowCount });
         return data.data;
       } else {
         throw new Error(data.error || 'Backend request failed');
       }
     } catch (error: any) {
-      logger.error('Error fetching data via backend', error);
+      Logger.error('Error fetching data via backend', error);
       throw new Error(`Backend API error: ${error.message}`);
     }
   }
@@ -319,7 +307,7 @@ export async function fetchHeadersWithPublicAPI(spreadsheetId: string, sheetName
     console.log('🌐 Using public Google Sheets API for headers...');
     
     const response = await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetName}!A1:Z1?key=${apiKey}`
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${sheetName}!A1:ZZ1?key=${apiKey}`
     );
     
     if (!response.ok) {
@@ -341,7 +329,7 @@ export async function fetchHeadersWithPublicAPI(spreadsheetId: string, sheetName
  * Fallback function for when all API methods fail
  */
 export function getFallbackSheetNames(): string[] {
-  console.log('🔄 Using fallback sheet names...');
+  Logger.warn('🔄 Using FALLBACK/DUMMY sheet names - these are NOT your real Google Sheet tabs!');
   return [
     'KPIs Report',
     'Modules', 

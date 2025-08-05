@@ -9,8 +9,16 @@ import {
   updateDoc, 
   query, 
   where,
-  Timestamp 
+  Timestamp,
+  getDoc
 } from "firebase/firestore";
+import { 
+  hasDataChanged, 
+  Logger, 
+  sessionCache, 
+  PersistentCache, 
+  CACHE_KEYS 
+} from "../utils/optimizations";
 
 // Firebase configuration
 const firebaseConfig = {
@@ -140,37 +148,62 @@ export interface FirestoreHeader {
 // =============================================================================
 
 /**
- * Save or update a connection in Firestore
+ * Save or update a connection in Firestore with optimization
  */
 export async function saveConnection(connection: any, region: 'saudi' | 'egypt'): Promise<void> {
   try {
-    console.log('🔥 Saving connection to Firebase:', connection.name);
+    Logger.debug('Checking if connection needs saving:', connection.name);
     
-    const connectionData: FirestoreConnection = {
+    // Check if connection already exists and if data has changed
+    const ref = doc(db, "connections", connection.id);
+    const existingDoc = await getDoc(ref);
+    
+    const newConnectionData: FirestoreConnection = {
       ...connection,
       region,
       lastUpdated: Timestamp.now(),
       createdAt: connection.createdAt ? Timestamp.fromDate(connection.createdAt) : Timestamp.now()
     };
 
-    const cleanedData = removeUndefined(connectionData);
-    console.log('🧼 Cleaned connection data before saving');
-    
-    const ref = doc(db, "connections", connection.id);
+    if (existingDoc.exists()) {
+      const existingData = existingDoc.data() as FirestoreConnection;
+      
+      // Only save if data has actually changed
+      if (!hasDataChanged(newConnectionData, existingData)) {
+        Logger.debug('Connection data unchanged, skipping save:', connection.name);
+        return;
+      }
+    }
+
+    const cleanedData = removeUndefined(newConnectionData);
     await setDoc(ref, cleanedData);
-    console.log("✅ Connection saved to Firebase");
+    
+    Logger.success(`Connection saved: ${connection.name}`);
+    
+    // Clear relevant caches
+    sessionCache.clear(`connections_${region}`);
+    PersistentCache.remove(CACHE_KEYS.CONNECTION_STATUS);
+    
   } catch (err) {
-    console.error("❌ Error saving connection:", err);
+    Logger.error("Error saving connection:", err);
     throw err;
   }
 }
 
 /**
- * Load all connections for a specific region
+ * Load all connections for a specific region with caching
  */
 export async function loadConnections(region: 'saudi' | 'egypt'): Promise<any[]> {
   try {
-    logger.firebaseLoad('connections', region, { region, collection: 'connections' });
+    const cacheKey = `connections_${region}`;
+    
+    // Check session cache first
+    if (sessionCache.has(cacheKey)) {
+      Logger.debug(`Loading connections from cache: ${region}`);
+      return sessionCache.get(cacheKey);
+    }
+    
+    Logger.debug(`Loading connections from Firebase: ${region}`);
     
     const connectionsQuery = query(
       collection(db, "connections"),
@@ -188,10 +221,13 @@ export async function loadConnections(region: 'saudi' | 'egypt'): Promise<any[]>
       };
     });
     
-    logger.firebaseResult('connection', connections.length);
+    // Cache for 10 minutes
+    sessionCache.set(cacheKey, connections, 10);
+    
+    Logger.success(`Loaded ${connections.length} connections for ${region}`);
     return connections;
   } catch (err) {
-    logger.error("Failed to load connections", err);
+    Logger.error("Failed to load connections", err);
     return [];
   }
 }
@@ -258,38 +294,60 @@ async function deleteConnectionSubcollections(connectionId: string): Promise<voi
 // =============================================================================
 
 /**
- * Save or update a database in Firestore
+ * Save or update a database in Firestore with optimization
  */
 export async function saveDatabase(connectionId: string, database: any): Promise<void> {
   try {
-    console.log('🔥 Saving database to Firebase:', database.name);
+    Logger.debug('Checking if database needs saving:', database.name);
     
-    const databaseData: FirestoreDatabase = {
+    // Check if database already exists and if data has changed
+    const ref = doc(db, `connections/${connectionId}/databases`, database.id);
+    const existingDoc = await getDoc(ref);
+    
+    const newDatabaseData: FirestoreDatabase = {
       ...database,
       lastUpdated: Timestamp.now(),
       createdAt: database.createdAt ? Timestamp.fromDate(database.createdAt) : Timestamp.now()
     };
 
-    const cleanedData = removeUndefined(databaseData);
-    console.log('🧼 Cleaned database data before saving');
+    if (existingDoc.exists()) {
+      const existingData = existingDoc.data() as FirestoreDatabase;
+      
+      // Only save if data has actually changed
+      if (!hasDataChanged(newDatabaseData, existingData)) {
+        Logger.debug('Database data unchanged, skipping save:', database.name);
+        return;
+      }
+    }
 
-    const ref = doc(db, `connections/${connectionId}/databases`, database.id);
+    const cleanedData = removeUndefined(newDatabaseData);
     await setDoc(ref, cleanedData);
-    console.log("✅ Database saved to Firebase");
+    
+    Logger.success(`Database saved: ${database.name}`);
+    
+    // Clear relevant caches
+    sessionCache.clear(`databases_${connectionId}`);
+    
   } catch (err) {
-    console.error("❌ Error saving database:", err);
+    Logger.error("Error saving database:", err);
     throw err;
   }
 }
 
-import logger from '../utils/logger';
-
 /**
- * Load all databases for a connection
+ * Load all databases for a connection with caching
  */
 export async function loadDatabases(connectionId: string): Promise<any[]> {
   try {
-    logger.firebaseLoad('databases', connectionId, { path: `connections/${connectionId}/databases` });
+    const cacheKey = `databases_${connectionId}`;
+    
+    // Check session cache first
+    if (sessionCache.has(cacheKey)) {
+      Logger.debug(`Loading databases from cache: ${connectionId}`);
+      return sessionCache.get(cacheKey);
+    }
+    
+    Logger.debug(`Loading databases from Firebase: ${connectionId}`);
     
     const snapshot = await getDocs(collection(db, `connections/${connectionId}/databases`));
     const databases = snapshot.docs.map(doc => {
@@ -302,10 +360,13 @@ export async function loadDatabases(connectionId: string): Promise<any[]> {
       };
     });
     
-    logger.firebaseResult('database', databases.length);
+    // Cache for 10 minutes
+    sessionCache.set(cacheKey, databases, 10);
+    
+    Logger.success(`Loaded ${databases.length} databases for connection`);
     return databases;
   } catch (err) {
-    logger.error("Failed to load databases", err);
+    Logger.error("Failed to load databases", err);
     return [];
   }
 }
@@ -362,26 +423,42 @@ async function deleteDatabaseSubcollections(connectionId: string, databaseId: st
 // =============================================================================
 
 /**
- * Save or update a table in Firestore
+ * Save or update a table in Firestore with optimization
  */
 export async function saveTable(connectionId: string, databaseId: string, table: any): Promise<void> {
   try {
-    console.log('🔥 Saving table to Firebase:', table.name);
+    Logger.debug('Checking if table needs saving:', table.name);
     
-    const tableData: FirestoreTable = {
+    // Check if table already exists and if data has changed
+    const ref = doc(db, `connections/${connectionId}/databases/${databaseId}/tables`, table.id);
+    const existingDoc = await getDoc(ref);
+    
+    const newTableData: FirestoreTable = {
       ...table,
       lastUpdated: Timestamp.now(),
       createdAt: table.createdAt ? Timestamp.fromDate(table.createdAt) : Timestamp.now()
     };
 
-    const cleanedData = removeUndefined(tableData);
-    console.log('🧼 Cleaned table data before saving');
+    if (existingDoc.exists()) {
+      const existingData = existingDoc.data() as FirestoreTable;
+      
+      // Only save if data has actually changed
+      if (!hasDataChanged(newTableData, existingData)) {
+        Logger.debug('Table data unchanged, skipping save:', table.name);
+        return;
+      }
+    }
 
-    const ref = doc(db, `connections/${connectionId}/databases/${databaseId}/tables`, table.id);
+    const cleanedData = removeUndefined(newTableData);
     await setDoc(ref, cleanedData);
-    console.log("✅ Table saved to Firebase");
+    
+    Logger.success(`Table saved: ${table.name}`);
+    
+    // Clear relevant caches
+    sessionCache.clear(`tables_${connectionId}_${databaseId}`);
+    
   } catch (err) {
-    console.error("❌ Error saving table:", err);
+    Logger.error("Error saving table:", err);
     throw err;
   }
 }
@@ -439,13 +516,29 @@ export async function deleteTable(connectionId: string, databaseId: string, tabl
 // =============================================================================
 
 /**
- * Save or update headers for a table in Firestore
+ * Save or update headers for a table in Firestore with optimization
  */
 export async function saveHeaders(connectionId: string, databaseId: string, tableId: string, headers: any[]): Promise<void> {
   try {
-    console.log('🔥 Saving headers to Firebase for table:', tableId);
+    Logger.debug('Checking if headers need saving for table:', tableId);
     
-    const promises = headers.map(header => {
+    // Load existing headers to compare
+    const existingHeaders = await loadHeaders(connectionId, databaseId, tableId);
+    const existingHeadersMap = new Map(existingHeaders.map(h => [h.id, h]));
+    
+    // Only save headers that have actually changed
+    const changedHeaders = headers.filter(header => {
+      const existing = existingHeadersMap.get(header.id);
+      if (!existing) return true; // New header
+      return hasDataChanged(header, existing);
+    });
+    
+    if (changedHeaders.length === 0) {
+      Logger.debug('No header changes detected, skipping save');
+      return;
+    }
+    
+    const promises = changedHeaders.map(header => {
       const headerData: FirestoreHeader = {
         ...header,
         lastUpdated: Timestamp.now(),
@@ -458,20 +551,31 @@ export async function saveHeaders(connectionId: string, databaseId: string, tabl
     });
 
     await Promise.all(promises);
-    console.log(`✅ ${headers.length} headers saved to Firebase`);
-    console.log('🧼 All header data cleaned before saving');
+    Logger.success(`${changedHeaders.length} headers updated for table: ${tableId}`);
+    
+    // Clear relevant caches
+    sessionCache.clear(`headers_${connectionId}_${databaseId}_${tableId}`);
+    
   } catch (err) {
-    console.error("❌ Error saving headers:", err);
+    Logger.error("Error saving headers:", err);
     throw err;
   }
 }
 
 /**
- * Load all headers for a table
+ * Load all headers for a table with caching
  */
 export async function loadHeaders(connectionId: string, databaseId: string, tableId: string): Promise<any[]> {
   try {
-    console.log('🔥 Loading headers from Firebase for table:', tableId);
+    const cacheKey = `headers_${connectionId}_${databaseId}_${tableId}`;
+    
+    // Check session cache first
+    if (sessionCache.has(cacheKey)) {
+      Logger.debug(`Loading headers from cache: ${tableId}`);
+      return sessionCache.get(cacheKey);
+    }
+    
+    Logger.debug('Loading headers from Firebase for table:', tableId);
     
     const snapshot = await getDocs(collection(db, `connections/${connectionId}/databases/${databaseId}/tables/${tableId}/headers`));
     const headers = snapshot.docs.map(doc => {
@@ -483,10 +587,13 @@ export async function loadHeaders(connectionId: string, databaseId: string, tabl
       };
     });
     
-    console.log(`✅ Loaded ${headers.length} headers from Firebase`);
+    // Cache for 15 minutes
+    sessionCache.set(cacheKey, headers, 15);
+    
+    Logger.success(`Loaded ${headers.length} headers for table: ${tableId}`);
     return headers;
   } catch (err) {
-    console.error("❌ Error loading headers:", err);
+    Logger.error("Error loading headers:", err);
     return [];
   }
 }

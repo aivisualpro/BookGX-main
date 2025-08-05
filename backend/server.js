@@ -122,7 +122,7 @@ app.post('/api/fetchSheets', async (req, res) => {
 // POST /api/fetchHeaders - Get headers from a specific sheet
 app.post('/api/fetchHeaders', async (req, res) => {
   try {
-    const { spreadsheetId, sheetName, connection, range = 'A1:Z1' } = req.body;
+    const { spreadsheetId, sheetName, connection, range = 'A1:ZZ1' } = req.body;
     
     console.log('🔐 Backend: Fetching headers with authenticated access...');
     console.log('📄 Spreadsheet ID:', spreadsheetId);
