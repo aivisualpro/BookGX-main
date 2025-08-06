@@ -158,10 +158,10 @@ export function PerformanceIndicators({ performance, stats, dateRange, onTimePer
     <>
       {/* Filter Bar */}
       <div className="w-full mb-6">
-        <div className="glass rounded-lg p-2 bg-gradient-to-r from-slate-800/50 to-slate-900/50 border border-white/10 relative overflow-hidden">
+        <div className="glass rounded-lg p-2 bg-gradient-to-r from-slate-800/50 to-slate-900/50 border border-white/10 relative">
           {/* Beautiful animated loading progress bar at bottom */}
           {isLoading && (
-            <div className="absolute bottom-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-green-500/10 to-transparent rounded-b-lg">
+            <div className="absolute bottom-0 left-0 w-full h-0.5 bg-gradient-to-r from-transparent via-green-500/10 to-transparent rounded-b-lg overflow-hidden">
               <div className="h-full rounded-b-lg shadow-lg shadow-green-500/30"
                    style={{
                      animation: 'loading-sweep-smooth 3s ease-in-out infinite',

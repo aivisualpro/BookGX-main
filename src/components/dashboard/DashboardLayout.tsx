@@ -480,6 +480,18 @@ export function DashboardLayout({ user, onNavigateHome, onNavigateUsers, onLogou
           </div>
         ) : data ? (
           <div className="space-y-6 animate-fade-in">
+            {/* PerformanceIndicators (moved to top after header) */}
+            {allowedCards.includes('PerformanceIndicators') && (
+              <PerformanceIndicators 
+                performance={data.performance} 
+                stats={data.stats}
+                dateRange={dateRange} 
+                onTimePeriodChange={handleTimePeriodChange} 
+                currentPeriod={currentPeriod} 
+                isLoading={loading}
+              />
+            )}
+
             {/* StatsOverview */}
             {allowedCards.includes('StatsOverview') && (
               <StatsOverview 
@@ -529,18 +541,6 @@ export function DashboardLayout({ user, onNavigateHome, onNavigateUsers, onLogou
                 <RevenueChart data={data.revenue} />
               )}
             </div>
-
-            {/* PerformanceIndicators (full width) - now handles its own layout */}
-            {allowedCards.includes('PerformanceIndicators') && (
-              <PerformanceIndicators 
-                performance={data.performance} 
-                stats={data.stats}
-                dateRange={dateRange} 
-                onTimePeriodChange={handleTimePeriodChange} 
-                currentPeriod={currentPeriod} 
-                isLoading={loading}
-              />
-            )}
           </div>
         ) : (
           <div className="glass rounded-xl p-8 text-center">
