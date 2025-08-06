@@ -55,7 +55,7 @@ export function DashboardLayout({ user, onNavigateHome, onNavigateUsers, onLogou
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
   const [showFilters, setShowFilters] = useState(false);
-  const [currentPeriod, setCurrentPeriod] = useState<string>('default');
+  const [currentPeriod, setCurrentPeriod] = useState<string>('this-month');
   
   // Refs to prevent infinite loops and track auto-refresh
   const initialLoadRef = useRef(false);
@@ -343,9 +343,12 @@ export function DashboardLayout({ user, onNavigateHome, onNavigateUsers, onLogou
         endDate.setHours(23, 59, 59, 999); // End of today
         break;
       case 'this-month':
-        // First day of current month to today
-        startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+        // Full current month - first day to last day
+        const now = new Date();
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
         startDate.setHours(0, 0, 0, 0);
+        // Last day of current month
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
         endDate.setHours(23, 59, 59, 999);
         break;
       case 'last-month':
@@ -374,9 +377,16 @@ export function DashboardLayout({ user, onNavigateHome, onNavigateUsers, onLogou
         endDate.setHours(23, 59, 59, 999);
     }
 
-    // Update dateRange state to keep it in sync
-    const newStartDate = startDate.toISOString().split('T')[0];
-    const newEndDate = endDate.toISOString().split('T')[0];
+    // Update dateRange state to keep it in sync - use local date format to avoid timezone issues
+    const formatLocalDate = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+    
+    const newStartDate = formatLocalDate(startDate);
+    const newEndDate = formatLocalDate(endDate);
     
     logger.info(`📅 Date range calculated: ${newStartDate} to ${newEndDate} for period "${period}"`);
     
@@ -401,14 +411,11 @@ export function DashboardLayout({ user, onNavigateHome, onNavigateUsers, onLogou
   useEffect(() => {
     if (!initialLoadRef.current) {
       initialLoadRef.current = true;
-      logger.info('🚀 Initial dashboard load triggered');
-      setCurrentPeriod('all');
-      loadData('', '', true).then(() => {
-        // Setup auto-refresh timer after initial load
-        setupAutoRefresh();
-      });
+      logger.info('🚀 Initial dashboard load triggered - loading this month data by default');
+      // Trigger this month filter instead of all data
+      handleTimePeriodChange('this-month');
     }
-  }, [loadData, setupAutoRefresh]);
+  }, [handleTimePeriodChange]);
 
   // Notify parent component when data changes - with anti-loop protection
   useEffect(() => {
