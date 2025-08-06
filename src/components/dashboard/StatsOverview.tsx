@@ -117,7 +117,7 @@ export function StatsOverview({ stats, dateRange, onTimePeriodChange, currentPer
                       {stat.change}
                     </span>
                   </div>
-                  
+                  {/* Test comments */}
                   <div>
                     <h3 className="text-sm font-medium text-muted-foreground mb-1">
                       {stat.title}
