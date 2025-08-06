@@ -319,12 +319,12 @@ export class RealSheetsDataService {
 
         // Validate the parsed date
         if (isNaN(rowDate.getTime())) {
-          logger.warn(`Invalid date value: ${dateValue}, excluding row`);
+          // Don't log every invalid date - creates spam
           return false;
         }
 
       } catch (error) {
-        logger.warn(`Failed to parse date: ${dateValue}, excluding row`);
+        // Don't log every parse error - creates spam
         return false;
       }
 
@@ -340,13 +340,20 @@ export class RealSheetsDataService {
       const isInRange = rowDate >= startDate && rowDate <= endDate;
       
       if (!isInRange) {
-        logger.debug(`Date ${rowDate.toISOString().split('T')[0]} outside range ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`);
+        // Don't log every excluded row - this creates spam
+        // Individual exclusions will be counted in summary
       }
 
       return isInRange;
     });
 
-    logger.success(`✅ Date filtering: ${data.length} → ${filteredData.length} rows`);
+    const excludedCount = data.length - filteredData.length;
+    if (excludedCount > 0) {
+      logger.info(`📊 Date filtering: ${data.length} total → ${filteredData.length} included, ${excludedCount} excluded (outside ${dateRange.start} to ${dateRange.end})`);
+    } else {
+      logger.success(`✅ Date filtering: ${data.length} → ${filteredData.length} rows (all included)`);
+    }
+    
     return filteredData;
   }
 
