@@ -480,11 +480,24 @@ export async function fetchRealDashboardData(dateRange?: { start: string; end: s
     });
     
     // Calculate other metrics from the real data
-    const uniqueClients = new Set(bookingMetrics.filteredData.map(row => {
-      // Find client name variable
-      const clientVars = Object.keys(row).filter(key => key.includes('client') || key.includes('name'));
-      return clientVars.length > 0 ? row[clientVars[0]] : 'Unknown';
-    })).size;
+    const clientNames = bookingMetrics.filteredData.map(row => {
+      // Use saudi1_maindb_bookingx_name field specifically for unique client count
+      const name = row['saudi1_maindb_bookingx_name'] || 'Unknown';
+      return name;
+    });
+    
+    // Remove any header-like values that might have slipped through
+    const filteredClientNames = clientNames.filter(name => {
+      // Exclude header values, empty strings, and obviously invalid names
+      return name && 
+             name !== 'Unknown' && 
+             name !== 'saudi1_maindb_bookingx_name' &&
+             !name.includes('maindb') &&
+             !name.includes('booking') &&
+             name.trim().length > 0;
+    });
+    
+    const uniqueClients = new Set(filteredClientNames).size;
 
     return {
       totalRevenue: bookingMetrics.totalRevenue,

@@ -148,7 +148,7 @@
     white-space: nowrap;
     opacity: 0;
     pointer-events: none;
-    z-index: 50;
+    z-index: 9999;
     transition: opacity 0.2s ease;
   }
 
@@ -277,5 +277,46 @@
 
   ::-webkit-scrollbar-thumb:hover {
     background: var(--gradient-secondary);
+  }
+
+  /* Loading progress bar animations */
+  @keyframes loading-sweep {
+    0% {
+      background-position: -200% 0;
+      opacity: 0.8;
+    }
+    50% {
+      opacity: 1;
+    }
+    100% {
+      background-position: 200% 0;
+      opacity: 0.8;
+    }
+  }
+
+  @keyframes loading-sweep-smooth {
+    0% {
+      background-position: -300% 0;
+      opacity: 0.6;
+      transform: scaleX(0.8);
+    }
+    25% {
+      opacity: 0.9;
+      transform: scaleX(1);
+    }
+    50% {
+      background-position: 0% 0;
+      opacity: 1;
+      transform: scaleX(1.05);
+    }
+    75% {
+      opacity: 0.9;
+      transform: scaleX(1);
+    }
+    100% {
+      background-position: 300% 0;
+      opacity: 0.6;
+      transform: scaleX(0.8);
+    }
   }
 }

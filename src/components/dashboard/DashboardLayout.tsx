@@ -532,7 +532,14 @@ export function DashboardLayout({ user, onNavigateHome, onNavigateUsers, onLogou
 
             {/* PerformanceIndicators (full width) - now handles its own layout */}
             {allowedCards.includes('PerformanceIndicators') && (
-              <PerformanceIndicators performance={data.performance} />
+              <PerformanceIndicators 
+                performance={data.performance} 
+                stats={data.stats}
+                dateRange={dateRange} 
+                onTimePeriodChange={handleTimePeriodChange} 
+                currentPeriod={currentPeriod} 
+                isLoading={loading}
+              />
             )}
           </div>
         ) : (

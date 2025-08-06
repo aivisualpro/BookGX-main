@@ -182,8 +182,8 @@ export const transformToDashboardData = (rawData: any[], startDate?: string, end
     color: locationColors[index % locationColors.length]
   })).sort((a, b) => b.value - a.value);
 
-  // Client metrics
-  const uniqueClients = new Set(filteredData.map(row => row['Client Name'])).size;
+  // Client metrics - using saudi1_maindb_bookingx_name field
+  const uniqueClients = new Set(filteredData.map(row => row['saudi1_maindb_bookingx_name'] || 'Unknown')).size;
   
   // Acquisition channel analysis ("How did you know us?")
   const acquisitionChannels = filteredData.reduce((acc, row) => {
