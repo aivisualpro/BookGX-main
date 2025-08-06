@@ -260,7 +260,7 @@ export function HeadersManager({
   // Generate variable name based on header
   const generateVariableName = (connectionName: string, databaseName: string, tableName: string, headerName: string) => {
     const cleanName = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_');
-    return `levelOne_${cleanName(connectionName)}_levelTwo_${cleanName(databaseName)}_levelThree_${cleanName(tableName)}_levelFour_${cleanName(headerName)}`;
+    return `${cleanName(connectionName)}_${cleanName(databaseName)}_${cleanName(tableName)}_${cleanName(headerName)}`;
   };
 
   // Auto-generate variable name when original header changes
